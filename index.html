@@ -17,7 +17,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <style>
@@ -337,6 +337,7 @@ const Cloud=(()=>{
       <p class="small" id="lg-err" style="color:var(--danger);margin:0;font-weight:700">${msg||""}</p>
       <div class="row"><button class="btn" data-act="cloudlogin">Entrar</button><button class="btn ghost" data-act="close">Ahora no</button></div>`)}
   async function login(mail,pass){
+    if(!sb)throw {message:"no se ha cargado la conexión (sin internet o bloqueada)"};
     const {data,error}=await sb.auth.signInWithPassword({email:mail,password:pass});
     if(error)throw error;user=data.user;closeDialog();toast("Conectado. Los datos se comparten con el equipo");await pull(true);if(D.cloud&&D.cloud.dirty)await push();
   }
@@ -720,7 +721,9 @@ document.addEventListener("click",e=>{
   if(a==="new"){openPerson(null);return}
   if(a==="edit"){openPerson(D.people.find(x=>x.id===personId));return}
   if(a==="cloudlogin"){const m=$("lg-mail").value.trim(),pw=$("lg-pass").value;if(!m||!pw){$("lg-err").textContent="Escribe el correo y la contraseña.";return}
-    t.disabled=true;t.textContent="Entrando…";Cloud.login(m,pw).catch(()=>{$("lg-err").textContent="No se ha podido entrar. Revisa el correo y la contraseña.";t.disabled=false;t.textContent="Entrar"});return}
+    t.disabled=true;t.textContent="Entrando…";Cloud.login(m,pw).catch(e=>{const msg=String((e&&(e.message||e.error_description||e.msg))||e||"");
+      $("lg-err").textContent=/invalid login/i.test(msg)?"Correo o contraseña incorrectos.":/not confirmed/i.test(msg)?"La cuenta aún no está confirmada en Supabase.":/fetch|network/i.test(msg)?"No hay conexión con el servidor.":"No se ha podido entrar ("+msg.slice(0,120)+")";
+      t.disabled=false;t.textContent="Entrar"});return}
   if(a==="cloudlogout"){Cloud.logout().then(()=>render());return}
   if(a==="cloudlogin-open"){Cloud.loginDialog();return}
   if(a==="order"){orderMode=true;lastMoved=null;SND.tap();keepScroll(render);return}
