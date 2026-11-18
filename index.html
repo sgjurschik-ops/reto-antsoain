@@ -17,6 +17,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <style>
@@ -65,6 +66,11 @@ label.f span.h{font:500 .85rem var(--f);color:var(--muted)}
 .head .t small{display:block;color:var(--muted);font-size:.88rem}
 .soundbtn{width:48px;height:48px;border-radius:50%;border:2px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:none}
 .soundbtn svg{width:22px;height:22px}
+.cloud{border:0;background:none;padding:2px 0;font:700 .8rem var(--f);color:var(--muted);display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.cloud i{width:9px;height:9px;border-radius:50%;background:var(--line)}
+.cloud.ok{color:var(--accent-dark)}.cloud.ok i{background:var(--accent)}
+.cloud.wait i{background:var(--prog)}
+.cloud.off{color:var(--danger)}.cloud.off i{background:var(--danger)}
 
 /* recorrido */
 .route{display:grid;gap:10px}
@@ -203,7 +209,7 @@ label.f span.h{font:500 .85rem var(--f);color:var(--muted)}
 <div class="wrap" id="main">
   <header class="head noprint">
     <div class="logo" id="logo"></div>
-    <div class="t"><h1 id="title">Reto Antsoain</h1><small id="subtitle"></small></div>
+    <div class="t"><h1 id="title">Reto Antsoain</h1><small id="subtitle"></small><button class="cloud" id="cloudchip" hidden></button></div>
     <button class="soundbtn" id="soundbtn" aria-label="Sonido"></button>
   </header>
   <div id="view"></div>
@@ -250,7 +256,84 @@ function load(){
   // v2: las Pipas del centro empiezan sin vestir (maceta de barro, sin complementos)
   if((D.v||1)<2){D.people.forEach(p=>{if(CENTRO.includes(p.name)&&!hasGoal(p)){p.pot="barro";p.acc="ninguno"}});D.v=2}
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast("No se pudo guardar en este dispositivo")}}
+function save(opts){
+  D.cloud=D.cloud||{};if(!(opts&&opts.fromCloud)){D.cloud.dirty=true;if(opts&&opts.replace)D.cloud.replace=true}
+  try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast("No se pudo guardar en este dispositivo")}
+  if(!(opts&&opts.fromCloud))Cloud.schedule();
+}
+/* ---------- nube (Supabase): los datos se comparten entre todos los dispositivos del equipo ---------- */
+// Proyecto de Supabase del reto. La clave "publishable" está pensada para ir en la app; la seguridad la dan el inicio de sesión y las reglas RLS.
+const CLOUD_URL="https://titgyoaevafhjenauoob.supabase.co";
+const CLOUD_KEY="sb_publishable_YuuUFcGujIXIf9S5vqcsWQ_xsLyJ-DE";
+const CLOUD_ROW="antsoain";
+const Cloud=(()=>{
+  const on=!!(CLOUD_URL&&CLOUD_KEY)&&!inFrame&&typeof window.supabase!=="undefined";
+  let sb=null,user=null,timer=null,busy=false,state="local";
+  const strip=d=>{const c=JSON.parse(JSON.stringify(d));delete c.cloud;return c};
+  function setState(st){state=st;const c=$("cloudchip");if(!c)return;c.hidden=!(CLOUD_URL&&CLOUD_KEY)||inFrame;
+    const M={ok:["ok","Guardado en la nube"],wait:["wait","Guardando…"],off:["off","Sin conexión · se guardará al volver"],login:["off","Entrar para compartir los datos"],local:["","Solo en este dispositivo"]};
+    const [cls,txt]=M[st]||M.local;c.className="cloud "+cls;c.innerHTML=`<i></i>${txt}`}
+  function merge(sv,lc){
+    const out=JSON.parse(JSON.stringify(sv));out.people=out.people||[];out.sessions=out.sessions||{};
+    const gone=new Set(lc.deleted||[]);out.deleted=[...new Set([...(out.deleted||[]),...gone])];
+    const byId=new Map(out.people.map(p=>[p.id,p]));
+    for(const p of lc.people||[]){const sp=byId.get(p.id);if(!sp){out.people.push(JSON.parse(JSON.stringify(p)));continue}
+      const ms=new Map((sp.measures||[]).map(m=>[m.d,m]));(p.measures||[]).forEach(m=>ms.set(m.d,m));
+      Object.assign(sp,JSON.parse(JSON.stringify(p)),{measures:[...ms.values()],banked:Math.max(sp.banked||0,p.banked||0)})}
+    out.people=out.people.filter(p=>!new Set(out.deleted).has(p.id));
+    for(const [d,ss] of Object.entries(lc.sessions||{})){const o=out.sessions[d]||{att:{},borg:{}};out.sessions[d]={att:{...(o.att||{}),...(ss.att||{})},borg:{...(o.borg||{}),...(ss.borg||{})}}}
+    out.settings={...(out.settings||{}),...(lc.settings||{})};out.seeded=true;out.v=Math.max(out.v||1,lc.v||1);
+    return out;
+  }
+  async function pull(force){
+    if(!sb||!user||busy)return;
+    if(D.cloud&&D.cloud.dirty&&!force){return push()}
+    try{const {data,error}=await sb.from("reto_estado").select("data,updated_at").eq("id",CLOUD_ROW).maybeSingle();if(error)throw error;
+      if(!data){D.cloud={dirty:true,replace:true};return push()}
+      if(!D.cloud||D.cloud.at!==data.updated_at){const keepSound=D.settings&&D.settings.sound;
+        localStorage.setItem(KEY,JSON.stringify({...data.data,cloud:{at:data.updated_at,dirty:false}}));load();if(keepSound!=null)D.settings.sound=keepSound;
+        if(typeof render==="function"&&$("layer").hidden)keepScroll(render)}
+      setState("ok");
+    }catch(e){setState("off")}
+  }
+  async function push(){
+    if(!sb||!user)return;if(busy){schedule();return}busy=true;setState("wait");
+    try{
+      let payload=strip(D);
+      if(!(D.cloud&&D.cloud.replace)){const {data,error}=await sb.from("reto_estado").select("data,updated_at").eq("id",CLOUD_ROW).maybeSingle();if(error)throw error;
+        if(data&&(!D.cloud||data.updated_at!==D.cloud.at))payload=merge(data.data,payload)}
+      const at=new Date().toISOString();
+      const {error}=await sb.from("reto_estado").upsert({id:CLOUD_ROW,data:payload,updated_at:at});if(error)throw error;
+      const sound=D.settings.sound;D=payload;D.settings.sound=sound;D.cloud={at,dirty:false};
+      try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){}
+      setState("ok");
+    }catch(e){setState("off");clearTimeout(timer);timer=setTimeout(push,30000)}
+    finally{busy=false}
+  }
+  function schedule(){if(!sb||!user)return;clearTimeout(timer);setState("wait");timer=setTimeout(push,900)}
+  function loginDialog(msg){
+    openDialog(`<h2>Entrar al reto</h2><p class="small muted" style="margin:0">Con la cuenta del equipo, los datos se comparten entre todas las tablets y móviles. Solo hay que hacerlo una vez en cada dispositivo.</p>
+      <label class="f">Correo<input type="text" id="lg-mail" inputmode="email" autocomplete="username" data-focus></label>
+      <label class="f">Contraseña<input type="password" id="lg-pass" autocomplete="current-password" style="width:100%;min-height:52px;border-radius:14px;border:2px solid var(--line);padding:0 12px;font:500 1.05rem var(--f)"></label>
+      <p class="small" id="lg-err" style="color:var(--danger);margin:0;font-weight:700">${msg||""}</p>
+      <div class="row"><button class="btn" data-act="cloudlogin">Entrar</button><button class="btn ghost" data-act="close">Ahora no</button></div>`)}
+  async function login(mail,pass){
+    const {data,error}=await sb.auth.signInWithPassword({email:mail,password:pass});
+    if(error)throw error;user=data.user;closeDialog();toast("Conectado. Los datos se comparten con el equipo");await pull(true);if(D.cloud&&D.cloud.dirty)await push();
+  }
+  async function start(){
+    setState("local");if(!on)return;
+    sb=window.supabase.createClient(CLOUD_URL,CLOUD_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+    try{const {data}=await sb.auth.getSession();user=data.session&&data.session.user}catch(e){}
+    if(!user){setState("login");loginDialog();return}
+    await pull();
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden)pull()});
+    window.addEventListener("online",()=>pull());
+    setInterval(()=>{if(!document.hidden)pull()},60000);
+  }
+  async function logout(){if(sb)await sb.auth.signOut();user=null;setState("login");toast("Sesión cerrada en este dispositivo")}
+  return {start,schedule,pull,login,loginDialog,logout,get enabled(){return on},get user(){return user},get state(){return state}};
+})();
 function addCentro(){
   const have=new Set(D.people.map(p=>p.name.trim().toLowerCase()));let n=0;
   CENTRO.forEach((name,i)=>{if(have.has(name.toLowerCase()))return;D.people.push({id:uid(),name,pot:"barro",acc:"ninguno",goal:noGoal(),measures:[],banked:0,created:today()});n++});
@@ -570,6 +653,9 @@ function vAjustes(){
     <div class="grid2"><label class="f">Salida del recorrido<input type="text" id="s-start" maxlength="30" value="${esc(s.start)}"></label><label class="f">Llegada del recorrido<input type="text" id="s-end" maxlength="30" value="${esc(s.end)}"></label></div>
     <div class="grid2"><label class="f">Primer lunes del reto<input type="date" id="s-sdate" value="${esc(s.startDate)}"></label><label class="f">Día del reto final<input type="date" id="s-date" value="${esc(s.endDate)}"></label></div>
     <button class="btn" data-act="saveset" style="justify-self:start">Guardar cambios</button></section>
+  ${CLOUD_URL&&CLOUD_KEY&&!inFrame?`<section class="card" style="display:grid;gap:12px"><h2>☁️ Datos compartidos</h2>
+    <p class="small muted" style="margin:0">${Cloud.user?`Conectado como <b>${esc(Cloud.user.email||"")}</b>. Todo lo que apuntéis se guarda en la nube y se ve en cualquier tablet o móvil del equipo.`:"Este dispositivo no está conectado: los datos solo se guardan aquí."}</p>
+    <div class="row">${Cloud.user?`<button class="btn ghost" data-act="cloudlogout">Cerrar sesión en este dispositivo</button>`:`<button class="btn" data-act="cloudlogin-open">Entrar con la cuenta del equipo</button>`}</div></section>`:""}
   <section class="card" style="display:grid;gap:12px"><h2>Copia de seguridad</h2>
     <p class="small muted" style="margin:0">Los datos se guardan solo en este dispositivo. Descarga una copia cada pocas semanas; sirve también para pasar los datos a otra tablet o móvil.</p>
     <div class="row">${inFrame?`<span class="small muted">La descarga funciona en la app instalada.</span>`:`<button class="btn soft" data-act="backup">Descargar copia</button><button class="btn soft" data-act="csv">Exportar a Excel (CSV)</button>`}<button class="btn ghost" data-act="import">Cargar una copia</button></div></section>
@@ -610,6 +696,10 @@ document.addEventListener("click",e=>{
   if(a==="close"){closeDialog();render();return}
   if(a==="new"){openPerson(null);return}
   if(a==="edit"){openPerson(D.people.find(x=>x.id===personId));return}
+  if(a==="cloudlogin"){const m=$("lg-mail").value.trim(),pw=$("lg-pass").value;if(!m||!pw){$("lg-err").textContent="Escribe el correo y la contraseña.";return}
+    t.disabled=true;t.textContent="Entrando…";Cloud.login(m,pw).catch(()=>{$("lg-err").textContent="No se ha podido entrar. Revisa el correo y la contraseña.";t.disabled=false;t.textContent="Entrar"});return}
+  if(a==="cloudlogout"){Cloud.logout().then(()=>render());return}
+  if(a==="cloudlogin-open"){Cloud.loginDialog();return}
   if(a==="places"){
     openDialog(`<h2>📍 Lugares del barrio</h2><p class="small muted" style="margin:0">Cada parada del recorrido es un lugar del barrio. Escribe cuál es. Van en orden, desde la salida (${esc(D.settings.start)}) hasta la llegada (${esc(D.settings.end)}).</p>
       <div class="placelist">${D.people.map((p,i)=>`<label class="f"><span><span class="pnum">${i+1}</span> Parada de ${esc(p.name)}</span><input type="text" data-place="${p.id}" maxlength="40" value="${esc(p.place||"")}" placeholder="Ej.: el parque, la iglesia, el frontón…"></label>`).join("")}</div>
@@ -633,7 +723,7 @@ document.addEventListener("click",e=>{
     save();closeDialog();SND.save();toast(banked?`Reto cambiado. Sus ${banked} puntos de progreso se quedan.`:id?"Cambios guardados":`${name} se ha unido al reto`,3600);render();return}
   if(a==="delperson"){
     if(!t.classList.contains("sure")){t.classList.add("sure");t.textContent="Pulsa otra vez para eliminar";return}
-    const id=t.dataset.id;D.people=D.people.filter(x=>x.id!==id);Object.values(D.sessions).forEach(s=>{delete s.att[id];delete s.borg[id]});save();closeDialog();go("personas");toast("Participante eliminado");return}
+    const id=t.dataset.id;D.deleted=[...(D.deleted||[]),id];D.people=D.people.filter(x=>x.id!==id);Object.values(D.sessions).forEach(s=>{delete s.att[id];delete s.borg[id]});save();closeDialog();go("personas");toast("Participante eliminado");return}
   if(a==="addmeas"){
     const p=D.people.find(x=>x.id===personId);const v=num($("m-val").value),d=$("m-date").value;
     if(v==null||!d){toast("Pon la fecha y el valor");return}
@@ -661,7 +751,7 @@ document.addEventListener("click",e=>{
     demo();go("equipo");toast("Objetivos de ejemplo puestos");return}
   if(a==="wipe"){
     if(!t.classList.contains("sure")){t.classList.add("sure");t.textContent="Pulsa otra vez para borrarlo todo";setTimeout(()=>{if(t.isConnected){t.classList.remove("sure");t.textContent="Borrar todos los datos"}},4000);return}
-    D={settings:{...D.settings},people:[],sessions:{},seeded:true};save();go("equipo");toast("Datos borrados");return}
+    D={settings:{...D.settings},people:[],sessions:{},seeded:true,v:D.v};save({replace:true});go("equipo");toast("Datos borrados");return}
 });
 document.addEventListener("input",e=>{
   if(e.target.dataset&&e.target.dataset.meas&&sess){sess.meas[e.target.dataset.meas]=e.target.value}
@@ -673,7 +763,7 @@ document.addEventListener("change",e=>{
 $("soundbtn").addEventListener("click",()=>{D.settings.sound=!D.settings.sound;save();header();if(D.settings.sound)SND.tap()});
 $("importfile").addEventListener("change",async()=>{
   const f=$("importfile").files[0];if(!f)return;
-  try{const d=JSON.parse(await f.text());if(!d||!Array.isArray(d.people))throw 0;localStorage.setItem(KEY,JSON.stringify({...d,seeded:true}));load();go("equipo");toast("Copia cargada")}
+  try{const d=JSON.parse(await f.text());if(!d||!Array.isArray(d.people))throw 0;localStorage.setItem(KEY,JSON.stringify({...d,seeded:true}));load();save({replace:true});go("equipo");toast("Copia cargada")}
   catch(err){toast("Ese archivo no es una copia válida")}
   $("importfile").value="";
 });
@@ -705,14 +795,16 @@ function demo(){
     return {id:o.id||uid(),name,pot:o.pot||"barro",acc:o.acc||"ninguno",place:o.place||"",goal:{text,unit,start,target},banked:0,created:mon[0],measures:[{d:mon[3],v:v[0]},{d:mon[6],v:v[1]}]}});
   D.sessions={};
   mon.forEach((d,i)=>{const s={att:{},borg:{}};D.people.forEach((p,j)=>{if((i+j)%6!==5){s.att[p.id]=true;s.borg[p.id]=3+((i+j)%4)}});D.sessions[d]=s});
-  D.seeded=true;save();
+  D.seeded=true;save({replace:true});
 }
 
 /* app instalable */
 try{if(document.querySelector('meta[name="pipa-pwa"]')&&"serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{})}catch(e){}
 
+$("cloudchip").addEventListener("click",()=>{if(!Cloud.user&&Cloud.enabled)Cloud.loginDialog();else if(Cloud.enabled)Cloud.pull(true)});
 route();
-window.__reto={get D(){return D},pct,teamPct,demo,addCentro};
+Cloud.start();
+window.__reto={get D(){return D},pct,teamPct,demo,addCentro,Cloud};
 })();
 </script>
 
