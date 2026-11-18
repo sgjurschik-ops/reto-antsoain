@@ -827,7 +827,10 @@ function demo(){
 }
 
 /* app instalable */
-try{if(document.querySelector('meta[name="pipa-pwa"]')&&"serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{})}catch(e){}
+try{if(document.querySelector('meta[name="pipa-pwa"]')&&"serviceWorker" in navigator&&location.protocol==="https:"){
+  const had=!!navigator.serviceWorker.controller;let reloaded=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{if(had&&!reloaded){reloaded=true;location.reload()}});
+  navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{})}}catch(e){}
 
 $("cloudchip").addEventListener("click",()=>{if(!Cloud.user&&Cloud.enabled)Cloud.loginDialog();else if(Cloud.enabled)Cloud.pull(true)});
 route();
