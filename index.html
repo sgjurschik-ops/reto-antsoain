@@ -76,7 +76,7 @@ label.f span.h{font:500 .85rem var(--f);color:var(--muted)}
 .route{display:grid;gap:10px}
 .route .big-pct{font:700 2.6rem/1 var(--f);color:var(--accent-dark);font-variant-numeric:tabular-nums}
 .route .lead{font:700 1.05rem var(--f)}
-.ends{display:flex;justify-content:space-between;gap:10px;font:700 .92rem/1.3 var(--f)}
+.ends{display:flex;justify-content:space-between;gap:10px;font:700 .88rem/1.3 var(--f);color:var(--muted)}
 .ends span:last-child{text-align:right}
 .ends small{display:block;font:500 .78rem var(--f);color:var(--muted)}
 .mapbox{background:var(--sunk);border-radius:18px;padding:4px 2px;overflow:hidden}
@@ -86,6 +86,24 @@ label.f span.h{font:500 .85rem var(--f);color:var(--muted)}
 .legend i{display:inline-block;width:16px;height:16px;border-radius:50%;flex:none}
 .legend i.ring{background:none;border:4px solid var(--prog)}
 .legend i.ring.ok{border-color:var(--done)}
+.teamtop{display:flex;align-items:center;gap:14px}
+.tbar{flex:1;height:18px;border-radius:99px;background:var(--sunk);position:relative}
+.tbar i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.tbar span{position:absolute;right:-4px;top:50%;transform:translateY(-50%);font-size:1.3rem}
+.bigstats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bigstats div{background:var(--sunk);border-radius:16px;padding:10px 12px;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:0 10px}
+.bigstats .ic{font-size:1.8rem;grid-row:span 2}
+.bigstats b{font:700 1.6rem/1 var(--f)}.bigstats b small{font-size:1rem;color:var(--muted)}
+.bigstats div>span:last-child{font-size:.85rem;color:var(--muted)}
+.lg{display:inline-flex;align-items:center;gap:5px;margin-right:12px}.lg i{display:inline-block;width:14px;height:14px;border-radius:50%}
+.lg i.ring{border:4px solid var(--prog)}.lg i.ring.ok{border-color:var(--done)}
+.prow .num{position:absolute;left:-6px;top:-6px;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font:700 .78rem var(--f);display:grid;place-items:center}
+.prow{position:relative}
+.prow.ord{grid-template-columns:60px minmax(0,1fr) auto;border-style:dashed}
+.prow.moved{border-color:var(--accent);border-style:solid;background:var(--accent-soft)}
+.mv{display:flex;gap:6px}
+.mv button{width:52px;height:52px;border-radius:14px;border:2px solid var(--line);background:var(--surface);font-size:1.2rem;color:var(--accent-dark)}
+.mv button:disabled{opacity:.3}
 .count{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .count div{background:var(--sunk);border-radius:14px;padding:10px 12px}
 .count b{display:block;font:700 1.3rem var(--f);font-variant-numeric:tabular-nums}
@@ -281,6 +299,7 @@ const Cloud=(()=>{
       const ms=new Map((sp.measures||[]).map(m=>[m.d,m]));(p.measures||[]).forEach(m=>ms.set(m.d,m));
       Object.assign(sp,JSON.parse(JSON.stringify(p)),{measures:[...ms.values()],banked:Math.max(sp.banked||0,p.banked||0)})}
     out.people=out.people.filter(p=>!new Set(out.deleted).has(p.id));
+    if((lc.order_at||0)>=(sv.order_at||0)){const pos=new Map((lc.people||[]).map((p,i)=>[p.id,i]));out.people.sort((x,y)=>(pos.has(x.id)?pos.get(x.id):1e9)-(pos.has(y.id)?pos.get(y.id):1e9));out.order_at=lc.order_at||0}
     for(const [d,ss] of Object.entries(lc.sessions||{})){const o=out.sessions[d]||{att:{},borg:{}};out.sessions[d]={att:{...(o.att||{}),...(ss.att||{})},borg:{...(o.borg||{}),...(ss.borg||{})}}}
     out.settings={...(out.settings||{}),...(lc.settings||{})};out.seeded=true;out.v=Math.max(out.v||1,lc.v||1);
     return out;
@@ -486,29 +505,30 @@ function pendingNote(){
   const k=D.people.filter(p=>!hasGoal(p)).length;
   return k?`<div class="nogoal-box">A ${k===1?"1 persona":k+" personas"} les falta su reto. Toca su nombre en <b>Personas</b> para ponérselo.</div>`:"";
 }
+let orderMode=false,lastMoved=null;
 function vEquipo(){
   if(!D.people.length)return emptyState();
   const tp=teamPct();const n=D.people.length;const done=D.people.filter(p=>pct(p)>=1).length;
   const last=Object.keys(D.sessions).sort().pop();const lastAtt=last?Object.values(D.sessions[last].att||{}).filter(Boolean).length:0;
-  const msg=tp>=1?"¡El equipo puede completar todo el recorrido!":tp>=.75?"Ya se ve la meta.":tp>=.5?"Más de medio camino recorrido.":tp>=.25?"El equipo ya está en marcha.":"Primeros pasos del equipo.";
+  const rows=D.people.map((p,i)=>{const r=pct(p);
+    const right=orderMode?`<span class="mv"><button data-move="${p.id}" data-dir="-1" aria-label="Subir a ${esc(p.name)}" ${i===0?"disabled":""}>▲</button><button data-move="${p.id}" data-dir="1" aria-label="Bajar a ${esc(p.name)}" ${i===n-1?"disabled":""}>▼</button></span>`:(hasGoal(p)?pctHTML(r):"");
+    const inner=`<span class="num">${i+1}</span>${pipaOf(p)}<span style="display:grid;gap:5px;min-width:0"><b>${esc(p.name)}</b>${p.place?`<span class="small" style="color:var(--accent-dark)">📍 ${esc(p.place)}</span>`:""}${!orderMode&&hasGoal(p)?barHTML(r):""}</span>${right}`;
+    return orderMode?`<div class="prow ord${p.id===lastMoved?" moved":""}">${inner}</div>`:`<button class="prow" data-person="${p.id}">${inner}</button>`}).join("");
   return `<div class="teamgrid">
     <section class="card route">
-      <div class="spread"><div><div class="big-pct">${Math.round(tp*100)} %</div><div class="lead">del recorrido que el equipo ya puede hacer</div></div><span class="stage">${msg}</span></div>
-      <div class="ends"><span>● Salida<small>${esc(D.settings.start)}</small></span><span>Llegada ⚑<small>${esc(D.settings.end)}</small></span></div>
+      <div class="teamtop"><div class="big-pct">${Math.round(tp*100)} %</div><div class="tbar"><i style="width:${(tp*100).toFixed(1)}%"></i><span>🏁</span></div></div>
       <div class="mapbox">${routeSVG()}</div>
-      <button class="btn soft noprint" data-act="places" style="justify-self:start">📍 Lugares del barrio</button>
-      <div class="legend"><span><i class="ring"></i>Lo que lleva cada persona</span><span><i class="ring ok"></i>Reto conseguido</span><span><i style="background:var(--accent)"></i>Avance del equipo</span></div>
-      ${pendingNote()}
-      <div class="count"><div><b>${fmt(teamPoints())}</b><span>puntos de ${fmt(teamTarget())} para llegar</span></div><div><b>${done} / ${n}</b><span>retos conseguidos</span></div><div><b>${last?lastAtt+" / "+n:"—"}</b><span>vinieron el último lunes</span></div></div>
-      <details class="how"><summary>¿Cómo avanza el equipo?</summary><div>
-        <p>Cada lunes, cada persona suma puntos para el equipo, y <b>nunca se pierden</b>:</p>
-        <ul><li><b>Venir a la sesión:</b> +${PTS.att} puntos.</li><li><b>Esfuerzo:</b> +1 punto por cada número de la escala de Borg (de 0 a 10).</li><li><b>Mejorar en su reto:</b> hasta +${PTS.goal} puntos, según lo que avance. Cuenta su mejor marca.</li></ul>
-        <p>Si se le cambia el reto a alguien, lo que ya ha conseguido <b>se queda</b> y sigue sumando con el reto nuevo.</p>
-        <p>El anillo de cada persona muestra cómo va en su reto actual. Su Pipa crece con todo lo que ha avanzado y no encoge nunca.</p></div></details>
+      <div class="ends"><span>● ${esc(D.settings.start)}</span><span>${esc(D.settings.end)} ⚑</span></div>
+      <div class="bigstats"><div><span class="ic">🏆</span><b>${done}<small> / ${n}</small></b><span>retos</span></div><div><span class="ic">🙋</span><b>${last?lastAtt:"—"}<small> / ${n}</small></b><span>el último lunes</span></div></div>
+      <details class="how noprint"><summary>¿Cómo avanza el equipo?</summary><div>
+        <ul><li><b>Venir:</b> +${PTS.att} puntos.</li><li><b>Esfuerzo (Borg):</b> +1 por cada número.</li><li><b>Mejorar en su reto:</b> hasta +${PTS.goal}.</li></ul>
+        <p>Los puntos nunca se pierden, aunque cambie el reto. Llevamos <b>${fmt(teamPoints())}</b> de <b>${fmt(teamTarget())}</b>.</p>
+        <p><span class="lg"><i class="ring"></i>su reto</span> <span class="lg"><i class="ring ok"></i>conseguido</span> <span class="lg"><i style="background:var(--accent)"></i>equipo</span></p></div></details>
     </section>
     <section class="card" style="display:grid;gap:12px">
-      <div class="spread"><h2>Cada persona</h2><button class="link" data-go="personas">Ver todas</button></div>
-      <div class="plist">${D.people.slice().sort((a,b)=>pct(b)-pct(a)).map(p=>{const r=pct(p);return `<button class="prow" data-person="${p.id}">${pipaOf(p)}<span style="display:grid;gap:6px;min-width:0"><b>${esc(p.name)}</b>${p.place?`<span class="small" style="color:var(--accent-dark)">📍 ${esc(p.place)}</span>`:""}${hasGoal(p)?barHTML(r):`<span class="small" style="color:var(--prog-dark)">Falta su reto</span>`}</span>${hasGoal(p)?pctHTML(r):""}</button>`}).join("")}</div>
+      <div class="spread"><h2>El recorrido</h2><div class="row noprint">${orderMode?`<button class="btn" data-act="orderdone">✓ Listo</button>`:`<button class="btn soft" data-act="order">↕ Ordenar</button><button class="btn soft" data-act="places">📍 Lugares</button>`}</div></div>
+      ${orderMode?`<p class="small muted" style="margin:0">Mueve a cada persona con las flechas. El mapa cambia a la vez.</p>`:""}
+      <div class="plist">${rows}</div>
     </section></div>
     <button class="btn big noprint" data-go="sesion">Pasar lista del lunes</button>`;
 }
@@ -675,6 +695,7 @@ function route(){
   if(h.startsWith("persona-")){view="persona";personId=h.slice(8)}
   else view=["equipo","sesion","personas","ajustes"].includes(h)?h:"equipo";
   if(view!=="sesion")sess=null;
+  if(view!=="equipo")orderMode=false;
   render();window.scrollTo(0,0);
 }
 window.addEventListener("hashchange",route);
@@ -685,6 +706,8 @@ document.addEventListener("click",e=>{
   const t=e.target.closest("button,[data-go]");if(!t)return;
   if(t.dataset.go){e.preventDefault();go(t.dataset.go);return}
   if(t.dataset.person){go("persona-"+t.dataset.person);return}
+  if(t.dataset.move){const i=D.people.findIndex(x=>x.id===t.dataset.move),j=i+(+t.dataset.dir);if(i<0||j<0||j>=D.people.length)return;
+    const [p]=D.people.splice(i,1);D.people.splice(j,0,p);D.order_at=Date.now();lastMoved=p.id;save();SND.tap();keepScroll(render);return}
   if(t.dataset.att){const id=t.dataset.att;sess.att[id]=!sess.att[id];if(!sess.att[id])delete sess.borg[id];SND.tap();keepScroll(render);return}
   if(t.dataset.borg){const id=t.dataset.borg;sess.borg[id]=+t.dataset.v;sess.att[id]=true;SND.tap();keepScroll(render);return}
   if(t.dataset.pot){form.pot=t.dataset.pot;document.querySelectorAll("#pf-pot button").forEach(b=>b.setAttribute("aria-pressed",b===t));previewForm();return}
@@ -700,6 +723,8 @@ document.addEventListener("click",e=>{
     t.disabled=true;t.textContent="Entrando…";Cloud.login(m,pw).catch(()=>{$("lg-err").textContent="No se ha podido entrar. Revisa el correo y la contraseña.";t.disabled=false;t.textContent="Entrar"});return}
   if(a==="cloudlogout"){Cloud.logout().then(()=>render());return}
   if(a==="cloudlogin-open"){Cloud.loginDialog();return}
+  if(a==="order"){orderMode=true;lastMoved=null;SND.tap();keepScroll(render);return}
+  if(a==="orderdone"){orderMode=false;lastMoved=null;SND.save();toast("Orden guardado");keepScroll(render);return}
   if(a==="places"){
     openDialog(`<h2>📍 Lugares del barrio</h2><p class="small muted" style="margin:0">Cada parada del recorrido es un lugar del barrio. Escribe cuál es. Van en orden, desde la salida (${esc(D.settings.start)}) hasta la llegada (${esc(D.settings.end)}).</p>
       <div class="placelist">${D.people.map((p,i)=>`<label class="f"><span><span class="pnum">${i+1}</span> Parada de ${esc(p.name)}</span><input type="text" data-place="${p.id}" maxlength="40" value="${esc(p.place||"")}" placeholder="Ej.: el parque, la iglesia, el frontón…"></label>`).join("")}</div>
